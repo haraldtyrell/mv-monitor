@@ -1,5 +1,5 @@
 import Parser from 'rss-parser';
-import { NewsItem } from './types';
+import { NewsItem, COUNTRY_COORDS } from './types';
 import { classifySeverity, extractMineral, extractCountry, categorizeNews } from './severity';
 
 const parser = new Parser({
@@ -24,6 +24,26 @@ const RSS_SOURCES: RSSSource[] = [
   { url: 'https://news.google.com/rss/search?q=site:reuters.com+commodities+metals&hl=en-US&gl=US&ceid=US:en', name: 'Reuters' },
 ];
 
+// Get coordinates for a country
+function getCoordinates(country: string | undefined): { lat: number; lng: number } | undefined {
+  if (!country) return undefined;
+  
+  // Try exact match first
+  if (COUNTRY_COORDS[country]) {
+    return COUNTRY_COORDS[country];
+  }
+  
+  // Try partial match
+  const countryLower = country.toLowerCase();
+  for (const [name, coords] of Object.entries(COUNTRY_COORDS)) {
+    if (name.toLowerCase().includes(countryLower) || countryLower.includes(name.toLowerCase())) {
+      return coords;
+    }
+  }
+  
+  return undefined;
+}
+
 export async function fetchAllFeeds(): Promise<NewsItem[]> {
   const allItems: NewsItem[] = [];
   const seenTitles = new Set<string>();
@@ -32,17 +52,23 @@ export async function fetchAllFeeds(): Promise<NewsItem[]> {
     RSS_SOURCES.map(async (source) => {
       try {
         const feed = await parser.parseURL(source.url);
-        return feed.items.map((item) => ({
-          id: item.guid || item.link || `${source.name}-${Date.now()}-${Math.random()}`,
-          title: item.title || 'Untitled',
-          link: item.link || '#',
-          pubDate: item.pubDate || item.isoDate || new Date().toISOString(),
-          source: source.name,
-          category: categorizeNews(item.title || '', item.contentSnippet),
-          severity: classifySeverity(item.title || '', item.contentSnippet),
-          country: extractCountry(item.title || '', item.contentSnippet),
-          mineral: extractMineral(item.title || '', item.contentSnippet),
-        }));
+        return feed.items.map((item) => {
+          const country = extractCountry(item.title || '', item.contentSnippet);
+          const coordinates = getCoordinates(country);
+          
+          return {
+            id: item.guid || item.link || `${source.name}-${Date.now()}-${Math.random()}`,
+            title: item.title || 'Untitled',
+            link: item.link || '#',
+            pubDate: item.pubDate || item.isoDate || new Date().toISOString(),
+            source: source.name,
+            category: categorizeNews(item.title || '', item.contentSnippet),
+            severity: classifySeverity(item.title || '', item.contentSnippet),
+            country,
+            mineral: extractMineral(item.title || '', item.contentSnippet),
+            coordinates,
+          };
+        });
       } catch (error) {
         console.error(`Failed to fetch ${source.name}:`, error);
         return [];
